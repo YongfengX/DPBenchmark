@@ -1,0 +1,55 @@
+{
+  "schema_version": "0.1",
+  "run_id": "template",
+  "notes": "Template for the minimal loop (S3). `dpbench replay` fills run_id, workload, replay and policy.",
+  "hardware": {
+    "gpu_model": "NVIDIA L40S",
+    "gpu_count": 4,
+    "gpu_memory_gb": 48,
+    "interconnect": "pcie"
+  },
+  "model": {
+    "name": "Qwen/Qwen3.6-35B-A3B",
+    "precision": "bf16"
+  },
+  "framework": {
+    "name": "vllm",
+    "version": "0.32.0",
+    "commit": "FILL-IN: git sha of the v0.32.0 build actually running",
+    "launch_command": "VLLM_USE_DEEP_GEMM=0 vllm serve Qwen/Qwen3.6-35B-A3B --data-parallel-size 4 --tensor-parallel-size 1 --enable-expert-parallel --all2all-backend allgather_reducescatter --language-model-only --no-enable-prefix-caching --no-async-scheduling --max-model-len 32768 --max-num-seqs 256 --max-num-batched-tokens 8192 --gpu-memory-utilization 0.90 --api-server-count 1"
+  },
+  "parallel": {
+    "dp_size": 4,
+    "tp_size": 1,
+    "ep_size": 4,
+    "all2all_backend": "allgather_reducescatter"
+  },
+  "engine": {
+    "max_num_seqs": 256,
+    "max_num_batched_tokens": 8192,
+    "max_model_len": 32768,
+    "prefix_caching": false,
+    "speculative_decoding": false,
+    "async_scheduling": false,
+    "cuda_graph": true,
+    "eplb": null
+  },
+  "trace": {
+    "level": "L0",
+    "layer_sample_every": null,
+    "clock": "monotonic_ns"
+  },
+  "workload": {
+    "scenario": "template",
+    "seed": 0,
+    "fingerprint": "template",
+    "n_requests": 1
+  },
+  "replay": {
+    "mode": "test"
+  },
+  "policy": {
+    "dispatch": "rr",
+    "admission": "immediate"
+  }
+}

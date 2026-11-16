@@ -1,0 +1,23 @@
+# upstream sources checked out for reading and patching
+third_party/
+
+# generated workloads, run directories, engine traces
+wl/
+runs/
+traces/
+*.npy
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# editors and local tooling
+.vscode/
+.idea/
+.claude/

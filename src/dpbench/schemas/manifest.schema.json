@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dpbench/manifest/0.1",
+  "title": "dpbench run manifest",
+  "description": "One manifest per run. Two runs are comparable only if every field except `policy`, `replay.mode` and `run_id` is identical.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "hardware", "model", "framework", "parallel", "engine", "trace", "workload", "replay", "policy"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "created_utc": {"type": "string"},
+    "notes": {"type": "string"},
+    "hardware": {
+      "type": "object",
+      "required": ["gpu_model", "gpu_count", "gpu_memory_gb", "interconnect"],
+      "additionalProperties": false,
+      "properties": {
+        "gpu_model": {"type": "string"},
+        "gpu_count": {"type": "integer", "minimum": 1},
+        "gpu_memory_gb": {"type": "number", "exclusiveMinimum": 0},
+        "interconnect": {"enum": ["pcie", "nvlink", "other"]},
+        "host": {"type": "string"},
+        "cpu": {"type": "string"},
+        "host_memory_gb": {"type": "number"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["name", "precision"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "revision": {"type": "string"},
+        "precision": {"type": "string", "description": "e.g. bf16, fp8"}
+      }
+    },
+    "framework": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"enum": ["vllm", "sglang", "tensorrt-llm", "mock", "simulator"]},
+        "version": {"type": "string"},
+        "commit": {"type": "string"},
+        "launch_command": {"type": "string"}
+      }
+    },
+    "parallel": {
+      "type": "object",
+      "required": ["dp_size", "tp_size", "ep_size"],
+      "additionalProperties": false,
+      "properties": {
+        "dp_size": {"type": "integer", "minimum": 1},
+        "tp_size": {"type": "integer", "minimum": 1},
+        "ep_size": {"type": "integer", "minimum": 1},
+        "all2all_backend": {"type": "string"}
+      }
+    },
+    "engine": {
+      "type": "object",
+      "description": "Engine settings that must be frozen across compared runs.",
+      "required": ["prefix_caching", "speculative_decoding"],
+      "additionalProperties": true,
+      "properties": {
+        "max_num_seqs": {"type": "integer"},
+        "max_num_batched_tokens": {"type": "integer"},
+        "max_model_len": {"type": "integer"},
+        "prefix_caching": {"type": "boolean"},
+        "speculative_decoding": {"type": "boolean"},
+        "async_scheduling": {"type": "boolean"},
+        "cuda_graph": {"type": "boolean"},
+        "eplb": {"type": ["object", "null"]}
+      }
+    },
+    "trace": {
+      "type": "object",
+      "required": ["level"],
+      "additionalProperties": false,
+      "properties": {
+        "level": {"enum": ["L0", "L1", "L2"]},
+        "layer_sample_every": {"type": ["integer", "null"], "minimum": 1},
+        "clock": {"const": "monotonic_ns"}
+      }
+    },
+    "workload": {
+      "type": "object",
+      "required": ["scenario", "seed", "fingerprint", "n_requests"],
+      "additionalProperties": true,
+      "properties": {
+        "scenario": {"type": "string"},
+        "source": {"type": "string"},
+        "seed": {"type": "integer"},
+        "fingerprint": {"type": "string", "description": "sha256 of the scheduled request set"},
+        "n_requests": {"type": "integer", "minimum": 1},
+        "n_copies": {"type": "integer", "minimum": 1},
+        "corpus": {"type": ["string", "null"]}
+      }
+    },
+    "replay": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["mirror", "lag", "test"]},
+        "lag_s": {"type": "number", "minimum": 0},
+        "jitter_s": {"type": ["number", "null"], "minimum": 0},
+        "time_scale": {"type": "number", "exclusiveMinimum": 0},
+        "tier": {"enum": ["fast", "full"]},
+        "arrival_rate": {"type": ["number", "null"]}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["dispatch", "admission"],
+      "additionalProperties": false,
+      "properties": {
+        "dispatch": {"type": "string"},
+        "dispatch_params": {"type": "object"},
+        "admission": {"type": "string"},
+        "admission_params": {"type": "object"}
+      }
+    }
+  }
+}

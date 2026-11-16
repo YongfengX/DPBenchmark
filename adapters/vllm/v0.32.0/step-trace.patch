@@ -1,0 +1,108 @@
+diff --git a/vllm/v1/engine/core.py b/vllm/v1/engine/core.py
+index 35cc8cc..5e28772 100644
+--- a/vllm/v1/engine/core.py
++++ b/vllm/v1/engine/core.py
+@@ -244,6 +244,9 @@ class EngineCore:
+         )
+         self.async_scheduling = vllm_config.scheduler_config.async_scheduling
+ 
++        # dpbench: step-table tracer, set by DPEngineCoreProc when enabled.
++        self._dpbench_tracer: Any = None
++
+         self.aborts_queue = queue.Queue[list[str]]()
+ 
+         self._idle_state_callbacks: list[Callable] = []
+@@ -664,7 +667,12 @@ class EngineCore:
+         # or finished and not yet removed from the batch.
+         if not self.scheduler.has_requests():
+             return {}, False
++        tracer = self._dpbench_tracer
++        if tracer is not None:
++            tracer.begin()
+         scheduler_output = self.scheduler.schedule(self._should_throttle_prefills())
++        if tracer is not None:
++            tracer.mark_exec()
+         future = self.model_executor.execute_model(scheduler_output, non_block=True)
+         grammar_output = self.scheduler.get_grammar_bitmask(scheduler_output)
+         with (
+@@ -674,6 +682,9 @@ class EngineCore:
+             model_output = future.result()
+             if model_output is None:
+                 model_output = self.model_executor.sample_tokens(grammar_output)
++        if tracer is not None:
++            # The sampled tokens are on the host, so the GPU work is done.
++            tracer.end(scheduler_output, self.scheduler.requests)
+ 
+         # Before processing the model output, process any aborts that happened
+         # during the model execution.
+@@ -2192,6 +2203,19 @@ class DPEngineCoreProc(EngineCoreProc):
+             tensor_queue=tensor_queue,
+         )
+ 
++        # dpbench: one step-table row per forward pass, real or dummy.
++        if os.environ.get("DPBENCH_STEP_TRACE_DIR"):
++            if self.batch_queue is not None:
++                logger.warning(
++                    "dpbench step trace is off: it needs --no-async-scheduling "
++                    "and pipeline parallel size 1."
++                )
++            else:
++                from dpbench.vllm_step_trace import StepTracer
++
++                self._dpbench_tracer = StepTracer.from_env(dp_rank)
++                logger.info("dpbench step trace on for DP rank %d.", dp_rank)
++
+     def _init_data_parallel(self, vllm_config: VllmConfig):
+         # Configure GPUs and stateless process group for data parallel.
+         parallel_config = vllm_config.parallel_config
+@@ -2350,6 +2374,12 @@ class DPEngineCoreProc(EngineCoreProc):
+             executed = self._process_engine_step()
+             self._maybe_publish_request_counts()
+ 
++            # dpbench: step_counter is still the count of forwards already
++            # done in this wave, so this forward is number step_counter + 1.
++            tracer = self._dpbench_tracer
++            if tracer is not None and executed:
++                tracer.commit(self.current_wave, self.step_counter + 1)
++
+             local_unfinished_reqs = self.scheduler.has_unfinished_requests()
+             if not executed:
+                 if not local_unfinished_reqs and not self.engines_running:
+@@ -2359,8 +2389,12 @@ class DPEngineCoreProc(EngineCoreProc):
+                 # Execute a dummy pass when no ready requests ran, unless the
+                 # engine is sleeping.
+                 elif not self.model_executor.is_sleeping:
++                    if tracer is not None:
++                        tracer.begin()
+                     with self.capture_iteration_details(None) as iteration_details:
+                         self.execute_dummy_batch()
++                    if tracer is not None:
++                        tracer.commit_dummy(self.current_wave, self.step_counter + 1)
+                     if iteration_details is not None and not self.has_coordinator:
+                         stats = self._make_iteration_details_stats(iteration_details)
+                         self.output_queue.put_nowait(
+@@ -2391,6 +2425,9 @@ class DPEngineCoreProc(EngineCoreProc):
+                 # Increment wave count and reset step counter.
+                 self.current_wave += 1
+                 self.step_counter = 0
++                if tracer is not None:
++                    # The engines are about to idle: hand rows to the writer.
++                    tracer.flush()
+             elif (
+                 not was_running
+                 and self.has_coordinator
+diff --git a/vllm/v1/worker/gpu_worker.py b/vllm/v1/worker/gpu_worker.py
+index 04feb5d..aef22b3 100644
+--- a/vllm/v1/worker/gpu_worker.py
++++ b/vllm/v1/worker/gpu_worker.py
+@@ -1435,6 +1435,10 @@ class Worker(WorkerBase):
+             uniform_decode=True,
+             randomize_inputs=self.randomize_dummy_inputs,
+         )
++        # dpbench: a dummy forward leaves nothing to copy back, so nothing
++        # waits for the GPU. Wait here so the step's end time is real.
++        if os.environ.get("DPBENCH_STEP_TRACE_DIR"):
++            torch.accelerator.synchronize()
+ 
+     def add_lora(self, lora_request: LoRARequest) -> bool:
+         return self.model_runner.add_lora(lora_request)
