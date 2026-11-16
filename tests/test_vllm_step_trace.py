@@ -43,33 +43,39 @@ def sched_out(tokens, new=(), in_prefill=()):
     )
 
 
-def real(tracer, wave, k, tokens, computed, **kw):
-    tracer.begin()
-    tracer.mark_exec()
-    tracer.end(sched_out(tokens, **kw), {r: SimpleNamespace(num_computed_tokens=n) for r, n in computed.items()})
-    tracer.commit(wave, k)
+def real(tokens, computed, **kw):
+    """One rank's work in a real forward: scheduler output and the request map after schedule()."""
+    return sched_out(tokens, **kw), {r: SimpleNamespace(num_computed_tokens=n) for r, n in computed.items()}
+
+
+def forward(wave, k, *ranks):
+    """One forward pass on several ranks at once: every rank begins before any rank ends.
+
+    ``ranks`` are (tracer, work) pairs; work is ``real(...)`` or None for a dummy forward.
+    The ranks of a real engine run a forward concurrently, and the overlap check relies on it.
+    """
+    for tracer, _ in ranks:
+        tracer.begin()
+    for tracer, work in ranks:
+        if work is None:
+            tracer.commit_dummy(wave, k)
+        else:
+            tracer.mark_exec()
+            tracer.end(*work)
+            tracer.commit(wave, k)
 
 
 def dummy(tracer, wave, k):
-    tracer.begin()
-    tracer.commit_dummy(wave, k)
+    forward(wave, k, (tracer, None))
 
 
 @pytest.fixture
 def trace_dir(tmp_path):
     t0, t1 = vst.StepTracer(tmp_path, 0), vst.StepTracer(tmp_path, 1)
-    # forward 1
-    real(t0, 0, 1, {"a": 100}, {"a": 100}, new=["a"])
-    dummy(t1, 0, 1)
-    # forward 2
-    real(t0, 0, 2, {"a": 1}, {"a": 101})
-    real(t1, 0, 2, {"b": 40}, {"b": 40}, new=["b"])
-    # forward 3
-    real(t0, 0, 3, {"a": 1}, {"a": 102})
-    real(t1, 0, 3, {"b": 1}, {"b": 41})
-    # forward 4
-    dummy(t0, 0, 4)
-    dummy(t1, 0, 4)
+    forward(0, 1, (t0, real({"a": 100}, {"a": 100}, new=["a"])), (t1, None))
+    forward(0, 2, (t0, real({"a": 1}, {"a": 101})), (t1, real({"b": 40}, {"b": 40}, new=["b"])))
+    forward(0, 3, (t0, real({"a": 1}, {"a": 102})), (t1, real({"b": 1}, {"b": 41})))
+    forward(0, 4, (t0, None), (t1, None))
     t0.close()
     t1.close()
     return tmp_path
